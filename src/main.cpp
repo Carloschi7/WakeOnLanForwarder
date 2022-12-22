@@ -125,7 +125,6 @@ int main() {
 	pcap_pkthdr* header;
 	const u_char* packet = nullptr;
 
-	std::string local_network = "Network adapter 'Realtek PCIe GbE Family Controller' on local host";
 	//This is the default Wake on Lan traveling port
 	std::string wake_on_lan_recv = "udp port 9";
 
@@ -146,10 +145,6 @@ int main() {
 	int index = 0, input_choice = 0;
 	for (pcap_if_t* d = dev; d != nullptr; d = d->next, index++) {
 		std::cout << index << ":" << d->name << ":\n" << d->description << "\n\n";
-
-		if (std::strcmp(d->description, local_network.c_str()) == 0) {
-			my_dev = d;
-		}
 	}
 
 	std::cout << "Choose sniffing device:\n";
