@@ -36,8 +36,11 @@ public:
 	{}
 
 	~Enclosure() {
-		pcap_close(m_Handler);
-		pcap_freealldevs(m_Alldevs);
+		if(m_Handler)
+			pcap_close(m_Handler);
+		
+		if(m_Alldevs)
+			pcap_freealldevs(m_Alldevs);
 	}
 private:
 	pcap_t*& m_Handler;
@@ -140,16 +143,30 @@ int main() {
 		return -1;
 	}
 
-	for (pcap_if_t* d = dev; d != nullptr; d = d->next) {
-		std::cout << d->name << ":\n" << d->description << "\n\n";
+	int index = 0, input_choice = 0;
+	for (pcap_if_t* d = dev; d != nullptr; d = d->next, index++) {
+		std::cout << index << ":" << d->name << ":\n" << d->description << "\n\n";
 
 		if (std::strcmp(d->description, local_network.c_str()) == 0) {
 			my_dev = d;
 		}
 	}
 
-	if (my_dev == nullptr)
-		my_dev = dev;
+	std::cout << "Choose sniffing device:\n";
+	std::cin >> input_choice;
+
+	my_dev = dev;
+	for (uint32_t i = 0; i < input_choice; i++) {
+		if(my_dev != nullptr)
+			my_dev = my_dev->next;
+	}
+
+	if (my_dev == nullptr) {
+		std::cout << "Index out of bounds\n";
+		//Just so the console does not close instantly
+		std::cin >> input_choice;
+		return -1;
+	}
 
 	//Find the device net (not actually used now)
 	if (pcap_lookupnet(my_dev->name, &net, &mask, errbuf) == -1) {
