@@ -27,6 +27,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <pcap/pcap.h>
 
 class Enclosure {
@@ -59,6 +60,9 @@ public:
 	const uint8_t* Payload() const {
 		return m_Data;
 	}
+	void Serialize(std::fstream& file) {
+		file.write(reinterpret_cast<char*>(m_Data), 6);
+	}
 private:
 	uint8_t m_Data[6]{};
 };
@@ -69,6 +73,22 @@ public:
 	IpAddress(uint8_t n0, uint8_t n1, uint8_t n2, uint8_t n3) :
 		m_Data{ n0,n1,n2,n3 }
 	{
+		
+	}
+
+	IpAddress(const std::string& str)
+	{
+		std::stringstream ss(str);
+
+		for (uint32_t i = 0; i < 4; i++) {
+			std::string value;
+			std::getline(ss, value, '.');
+			m_Data[i] = std::stoul(value);
+		}
+	}
+
+	void Serialize(std::fstream& file) {
+		file.write(reinterpret_cast<char*>(m_Data), 4);
 	}
 
 	const uint8_t* Payload() const {
@@ -87,6 +107,11 @@ std::ostream& operator<<(std::ostream& out, const IpAddress& ip) {
 struct NetworkInterface {
 	MacAddress mac;
 	IpAddress ip;
+
+	void Serialize(std::fstream& file) {
+		mac.Serialize(file);
+		ip.Serialize(file);
+	}
 };
 
 std::string ResolvePacketFor(const NetworkInterface& src, const NetworkInterface& dest, const u_char* pkt_src, uint32_t size) {
@@ -113,9 +138,51 @@ std::string ResolvePacketFor(const NetworkInterface& src, const NetworkInterface
 	return ss.str();
 }
 
-int main() {
+bool CheckDataPresent(std::fstream& src_file, std::fstream& dest_file) {
+	bool valid = false;
 
+	int p1 = src_file.tellg(), p2 = dest_file.tellg();
+
+	src_file.seekg(0, std::ios::end);
+	dest_file.seekg(0, std::ios::end);
+
+	if (src_file.tellg() == 10 || dest_file.tellg() == 10) {
+		valid = true;
+	}
+
+	src_file.seekg(p1);
+	dest_file.seekg(p2);
+	return valid;
+}
+
+void PrintInstructions() {
+	std::cout << "\n";
+	std::cout << "------------------WOLFWD Wake-On-Lan packet forwarder:------------------------\n";
+	std::cout << "\n";
+	std::cout << "forwards WOL packets from one device to another in the local network\n";
+	std::cout << "Useful when your router does not suoort static ARP tables:\n";
+	std::cout << "(If it does not support them, the router won't most likely forward:\n";
+	std::cout << "anything to turned off pcs)\n";
+	std::cout << "\n";
+	std::cout << "wolfwd SYNTAX:\n";
+	std::cout << "\n";
+	std::cout << "wolfwd set-sender <MAC-address> <IP-address> ------- establisher which device is the sender\n";
+	std::cout << "wolfwd set-receiver <MAC-address> <IP-address> --- establisher which device is the receiver\n";
+	std::cout << "wolfwd run ---------- when both the sender and the receiver are defined, starts the program\n";
+	std::cout << "\n";
+	std::cout << "Your network devices will appear, select with the realtive number the one you want\n";
+	std::cout << "to sniff on and you are good to go\n";
+}
+
+int main(int argc, char** argv) {
+
+	//To load the deleayed dll wpcap.dll
 	SetDllDirectory("C:/Windows/System32/Npcap");
+
+	if (argc == 1) {
+		std::cout << "error: not enough arguments, use wolfwd --help for more info\n";
+		return -1;
+	}
 
 	//Application data
 	pcap_if_t* dev = nullptr, *my_dev = nullptr;
@@ -127,12 +194,76 @@ int main() {
 
 	//This is the default Wake on Lan traveling port
 	std::string wake_on_lan_recv = "udp port 9";
+	std::fstream src_file;
+	std::fstream dest_file;
 
-	NetworkInterface src{ {"30:9c:23:8c:64:15"}, {192,168,1,222} };
-	NetworkInterface dest{ {"74:46:a0:bd:10:e2"}, {192,168,1,170} };
+	NetworkInterface src; //{ {"30:9c:23:8c:64:15"}, {192,168,1,222} }
+	NetworkInterface dest; // { {"74:46:a0:bd:10:e2"}, { 192,168,1,170 } }
+
+	//Arg handling
+	
+	bool go_forw = false;
+	if (strcmp(argv[1], "--help") == 0) {
+		//TODO handle help
+		PrintInstructions();
+	}
+	else if (strcmp(argv[1], "set-sender") == 0) {
+		//Means mac is not specified
+		if (argc != 4) {
+			std::cout << "Specify a MAC and an IP address\n";
+			return -1;
+		}
+		
+		src_file.open("src_savefile.txt", std::ios::out | std::ios::binary);
+		src.mac = MacAddress{ std::string(argv[2]) };
+		src.ip = IpAddress{ std::string(argv[3]) };
+		src_file.seekp(0, std::ios::beg);
+		src.Serialize(src_file);
+		src_file.close();
+	}
+	else if (strcmp(argv[1], "set-receiver") == 0) {
+		//Means mac is not specified
+		if (argc != 4) {
+			std::cout << "Specify a MAC and an IP address\n";
+			return -1;
+		}
+
+		dest_file.open("dest_savefile.txt", std::ios::out | std::ios::binary);
+		dest.mac = MacAddress{ std::string(argv[2]) };
+		dest.ip = IpAddress{ std::string(argv[3]) };
+		dest_file.seekp(0, std::ios::beg);
+		dest.Serialize(dest_file);
+		dest_file.close();
+	}
+	else if (strcmp(argv[1], "run") == 0) {
+		go_forw = true;
+	}
+	else {
+		std::cout << "Unknown option\n";
+	}
+
+	if(!go_forw)
+		return -1;
+	
+	//Read mode
+	src_file.open("src_savefile.txt", std::ios::in | std::ios::binary);
+	dest_file.open("dest_savefile.txt", std::ios::in | std::ios::binary);
+
+	//Checking for data
+	if (!CheckDataPresent(src_file, dest_file)) {
+		std::cout << "You need to provide a source and destination IP and MAC\n";
+		std::cout << "to use this program, type 'wolfwd --help' for more info\n";
+		return -1;
+	}
+
+	src_file.seekg(0);
+	src_file.read(reinterpret_cast<char*>(&src.mac), 6);
+	src_file.read(reinterpret_cast<char*>(&src.ip), 4);
+	dest_file.seekg(0);
+	dest_file.read(reinterpret_cast<char*>(&dest.mac), 6);
+	dest_file.read(reinterpret_cast<char*>(&dest.ip), 4);
 
 	Enclosure enc(handler, dev);
-
 	char errbuf[PCAP_ERRBUF_SIZE]{};
 
 	//Init pcap
@@ -214,5 +345,8 @@ int main() {
 		header->len = 0;
 	}
 
+
+	src_file.close();
+	dest_file.close();
 	return 0;
 }

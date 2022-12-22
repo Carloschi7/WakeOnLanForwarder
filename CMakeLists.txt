@@ -4,7 +4,7 @@ if("${NPCAP_SDK_PATH}" STREQUAL "")
 	message(FATAL_ERROR "Npcap path not defined")
 endif()
 
-project(WakeOnLanForwarder)
+project(wolfwd)
 
 add_executable(${PROJECT_NAME} src/main.cpp)
 
